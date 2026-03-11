@@ -34,8 +34,10 @@ const KNOWN_PROJECTS = [
 ];
 
 // ─── Database ────────────────────────────────────────────
-const DB_PATH = path.join(__dirname, '..', 'data', 'claude-remote.db');
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+// Store DB in Linux filesystem to avoid WSL2/NTFS SQLite issues
+const DB_DIR = process.env.DB_PATH || path.join(process.env.HOME || '/tmp', '.claude-remote');
+const DB_PATH = path.join(DB_DIR, 'claude-remote.db');
+fs.mkdirSync(DB_DIR, { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

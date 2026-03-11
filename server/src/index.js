@@ -243,7 +243,7 @@ function broadcast(sessionId, event) {
 const runningProcesses = new Map();
 
 function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath) {
-  const args = ['-p', prompt, '--output-format', 'stream-json'];
+  const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
   if (existingClaudeSessionId) {
     args.push('--resume', existingClaudeSessionId);
   }
@@ -277,26 +277,24 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
         const event = JSON.parse(line);
         if (event.session_id) claudeSessionId = event.session_id;
 
-        // Text content
-        if (event.type === 'assistant' && event.subtype === 'text') {
-          const text = event.content_block?.text || '';
-          if (text) {
-            fullOutput += text;
-            broadcast(sessionId, { type: 'stream', sessionId, content: text });
+        // Assistant message — extract text from content blocks
+        if (event.type === 'assistant' && event.message?.content) {
+          for (const block of event.message.content) {
+            if (block.type === 'text' && block.text) {
+              fullOutput += block.text;
+              broadcast(sessionId, { type: 'stream', sessionId, content: block.text });
+            }
+            if (block.type === 'tool_use') {
+              broadcast(sessionId, { type: 'tool_use', sessionId, tool: block.name || 'unknown' });
+            }
           }
         }
 
-        // Tool use
-        if (event.type === 'assistant' && event.subtype === 'tool_use') {
-          const name = event.content_block?.name || 'unknown';
-          broadcast(sessionId, { type: 'tool_use', sessionId, tool: name });
-        }
-
-        // Result
+        // Final result
         if (event.type === 'result') {
           if (event.session_id) claudeSessionId = event.session_id;
-          if (event.result && !fullOutput) fullOutput = event.result;
-          if (event.cost_usd) costUsd = event.cost_usd;
+          if (event.result) fullOutput = event.result;
+          if (event.total_cost_usd) costUsd = event.total_cost_usd;
         }
       } catch {
         // Non-JSON output — stream as raw text

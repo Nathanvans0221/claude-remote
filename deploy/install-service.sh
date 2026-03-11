@@ -25,6 +25,7 @@ Restart=always
 RestartSec=10
 Environment="NODE_ENV=production"
 Environment="PORT=3001"
+Environment="CLAUDE_REMOTE_PASSWORD=clauderemote"
 Environment="PATH=/home/$USER/.claude/bin:/usr/local/bin:/usr/bin:/bin"
 
 [Install]

@@ -1,173 +1,95 @@
-# Claude Remote
+# Claude Remote v2
 
-Access Claude Code from anywhere - phone, tablet, any browser. Submit tasks, monitor progress, view results.
+Access Claude Code from anywhere — phone, tablet, any browser. Full multi-turn sessions with real-time streaming, project awareness, and session continuity across devices.
 
-## Quick Start (Local Testing)
+## Quick Start (Local)
 
 ```bash
-# Install dependencies
 npm run install:all
-
-# Start dev servers (API + Web)
-npm run dev
-
-# Open http://localhost:5173
+npm run build:web
+npm run dev          # API on :3001, Web on :5173
 ```
+
+Open http://localhost:5173 — password: `clauderemote`
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────────────────────┐
-│  Phone/Browser  │────▶│  Web UI                         │
-│                 │     │  - Submit tasks                 │
-└─────────────────┘     │  - View progress/results        │
-                        └───────────┬─────────────────────┘
-                                    │ API calls
-                                    ▼
-                        ┌─────────────────────────────────┐
-                        │  Server                         │
-                        │  - Express API (port 3001)      │
-                        │  - SQLite task queue            │
-                        │  - Claude Code runner           │
-                        └─────────────────────────────────┘
+Phone/Browser ──► React PWA ──► Express API ──► Claude Code CLI
+                     │              │                │
+                     │         WebSocket         --resume
+                     │         (streaming)       (multi-turn)
+                     │              │                │
+                     └──────── SQLite ◄─────────────┘
+                           (sessions + messages)
 ```
+
+## Features
+
+- **Multi-turn sessions** — conversations persist, Claude `--resume` for context continuity
+- **Real-time streaming** — WebSocket pushes Claude output as it generates
+- **Project picker** — all registered projects auto-discovered, correct CWD + CLAUDE.md
+- **Password auth** — token-based, stored in localStorage
+- **Mobile-first PWA** — installable, responsive, dark theme
+- **Tool visibility** — see which tools Claude is using in real-time
+- **Session management** — create, switch, delete sessions from any device
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 19 + TypeScript + Tailwind CSS + Vite |
+| Backend | Express + SQLite (better-sqlite3) + ws |
+| Streaming | WebSocket (ws library) |
+| Claude | CLI spawn with `--output-format stream-json` + `--resume` |
+
+## Access from Phone (Same Network)
+
+Your WSL2 machine forwards ports to Windows. On your phone:
+
+1. Find Windows IP: `ipconfig` → look for your WiFi adapter IP (e.g., 192.168.1.x)
+2. Open `http://192.168.1.x:3001` on your phone
+3. Login with the password
 
 ## Deploy to VM (24/7 Access)
 
-### 1. Create VM
-
-**DigitalOcean (Recommended):**
-- Create Droplet: Ubuntu 22.04, $12/month (2GB RAM)
-- Add SSH key for access
-
-**Or AWS/Azure/GCP** - any Ubuntu VM works.
-
-### 2. SSH into VM
-
 ```bash
 ssh root@YOUR_VM_IP
-```
-
-### 3. Run Setup Script
-
-```bash
-# Create non-root user (recommended)
-adduser nathan
-usermod -aG sudo nathan
-su - nathan
-
-# Clone and setup
+# Setup
 git clone https://github.com/Nathanvans0221/claude-remote.git
 cd claude-remote
 chmod +x deploy/*.sh
 ./deploy/setup-vm.sh
-```
 
-### 4. Authenticate Claude
-
-```bash
+# Auth Claude
 claude auth login
-# Follow the browser auth flow
-```
 
-### 5. Install as Service
-
-```bash
+# Install as service
 sudo ./deploy/install-service.sh
 ```
 
-### 6. Access from Anywhere
+Then open `http://YOUR_VM_IP:3001` from anywhere.
 
-Open `http://YOUR_VM_IP:3001` on your phone or any browser.
+## Environment Variables
 
-## Optional: Add HTTPS with Domain
-
-1. Point your domain to VM IP
-2. Install nginx and certbot:
-   ```bash
-   sudo apt install nginx certbot python3-certbot-nginx
-   ```
-3. Copy nginx config:
-   ```bash
-   sudo cp deploy/nginx.conf /etc/nginx/sites-available/claude-remote
-   # Edit the server_name
-   sudo ln -s /etc/nginx/sites-available/claude-remote /etc/nginx/sites-enabled/
-   sudo certbot --nginx -d claude.yourdomain.com
-   ```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_REMOTE_PASSWORD` | `clauderemote` | Login password |
+| `PORT` | `3001` | Server port |
+| `PROJECTS_DIR` | `/mnt/c/Users/NathanvanWingerden` | Base projects directory |
+| `CLAUDE_BIN` | `claude` | Path to Claude CLI |
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/status` | Server status and queue counts |
-| GET | `/api/tasks` | List all tasks |
-| GET | `/api/tasks/:id` | Get single task |
-| POST | `/api/tasks` | Create new task |
-| DELETE | `/api/tasks/:id` | Delete task |
-
-### Create Task Example
-
-```bash
-curl -X POST http://YOUR_VM_IP:3001/api/tasks \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Fix login bug",
-    "prompt": "Find and fix the authentication bug in src/auth.js",
-    "project": "my-app"
-  }'
-```
-
-## Projects
-
-The task runner supports these projects (configured in web/src/App.jsx):
-
-- `action-center-static` - Static dashboard
-- `action-center-pwa` - PWA version
-- `blln-automation` - BLN data sync
-
-Add more in `PROJECTS` array in App.jsx.
-
-## Monitoring
-
-```bash
-# View service status
-sudo systemctl status claude-remote
-
-# View live logs
-sudo journalctl -u claude-remote -f
-
-# Restart service
-sudo systemctl restart claude-remote
-```
-
-## Security Notes
-
-- The VM has full Claude Code access - treat it like your dev machine
-- Consider adding basic auth or IP whitelisting for production
-- Don't expose the API without HTTPS in production
-- Keep your Claude API key secure on the VM
-
-## Cost Estimate
-
-- **DigitalOcean Droplet**: $12/month (2GB RAM)
-- **Claude API**: Pay per use (main cost for heavy usage)
-- **Domain (optional)**: ~$12/year
-
-## Troubleshooting
-
-**Claude not found:**
-```bash
-export PATH="$HOME/.claude/bin:$PATH"
-```
-
-**Service won't start:**
-```bash
-sudo journalctl -u claude-remote -n 50
-```
-
-**SQLite errors:**
-```bash
-# Rebuild native modules
-cd ~/claude-remote/server
-npm rebuild better-sqlite3
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth` | Login → get token |
+| GET | `/api/projects` | List available projects |
+| GET | `/api/sessions` | List sessions |
+| POST | `/api/sessions` | Create session |
+| GET | `/api/sessions/:id` | Get session + messages |
+| DELETE | `/api/sessions/:id` | Delete session |
+| POST | `/api/sessions/:id/messages` | Send message |
+| POST | `/api/sessions/:id/reset` | Reset stuck session |
+| GET | `/api/status` | Server health |
+| WS | `/ws?token=xxx` | Real-time streaming |

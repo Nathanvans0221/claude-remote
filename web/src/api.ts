@@ -77,6 +77,9 @@ export const api = {
       method: 'POST', body: JSON.stringify({ content }),
     }),
   getStatus: () => request<ServerStatus>('/api/status'),
+  getSettings: () => request<Record<string, string>>('/api/settings'),
+  updateSettings: (settings: Record<string, string>) =>
+    request('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
 };
 
 // ─── WebSocket ───────────────────────────────────────────

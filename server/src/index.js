@@ -66,6 +66,10 @@ db.exec(`
     created_at DATETIME DEFAULT (datetime('now')),
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
 
 // Reset stuck sessions on startup
@@ -192,6 +196,49 @@ app.get('/api/status', (_req, res) => {
     uptime: process.uptime(),
   });
 });
+
+// Settings
+app.get('/api/settings', (_req, res) => {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const settings = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json(settings);
+});
+
+app.put('/api/settings', (req, res) => {
+  const upsert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  const tx = db.transaction((entries) => {
+    for (const [key, value] of entries) {
+      upsert.run(key, String(value));
+    }
+  });
+  tx(Object.entries(req.body));
+  res.json({ ok: true });
+});
+
+// ─── Notifications ──────────────────────────────────────
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row?.value;
+}
+
+async function sendNtfyNotification(sessionTitle, preview) {
+  const topic = getSetting('ntfy_topic');
+  const enabled = getSetting('ntfy_enabled');
+  if (!topic || enabled !== 'true') return;
+
+  try {
+    await fetch(`https://ntfy.sh/${topic}`, {
+      method: 'POST',
+      headers: {
+        'Title': `Claude Remote — ${sessionTitle || 'Session'}`,
+        'Tags': 'robot',
+      },
+      body: preview.length > 200 ? preview.slice(0, 200) + '...' : preview,
+    });
+  } catch (err) {
+    console.error(`[NTFY] Failed: ${err.message}`);
+  }
+}
 
 // Serve web build (production)
 const webDist = path.join(__dirname, '..', '..', 'web', 'dist');
@@ -352,6 +399,10 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
       content: output, exitCode: code, costUsd,
     });
     console.log(`[CLAUDE] Session ${sessionId} done (exit ${code}, $${costUsd.toFixed(4)})`);
+
+    // Send push notification
+    const sess = db.prepare('SELECT title FROM sessions WHERE id = ?').get(sessionId);
+    sendNtfyNotification(sess?.title, output);
   });
 
   const timeout = setTimeout(() => {

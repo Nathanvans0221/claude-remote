@@ -250,7 +250,8 @@ const runningProcesses = new Map();
 function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath) {
   const args = [
     '-p', prompt,
-    '--output-format', 'text',
+    '--output-format', 'stream-json',
+    '--verbose',
     '--mcp-config', '{"mcpServers":{}}',
     '--strict-mcp-config',
   ];
@@ -273,9 +274,42 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
   let costUsd = 0;
 
   child.stdout.on('data', (data) => {
-    const chunk = data.toString();
-    fullOutput += chunk;
-    broadcast(sessionId, { type: 'stream', sessionId, content: chunk });
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+
+        // Capture session ID from any event
+        if (event.session_id) claudeSessionId = event.session_id;
+
+        // Assistant message — extract text + tool use
+        if (event.type === 'assistant' && event.message?.content) {
+          for (const block of event.message.content) {
+            if (block.type === 'text' && block.text) {
+              fullOutput += block.text;
+              broadcast(sessionId, { type: 'stream', sessionId, content: block.text });
+            }
+            if (block.type === 'tool_use') {
+              broadcast(sessionId, { type: 'tool_use', sessionId, tool: block.name || 'unknown' });
+            }
+          }
+        }
+
+        // Final result
+        if (event.type === 'result') {
+          if (event.result && !fullOutput) fullOutput = event.result;
+          if (event.total_cost_usd) costUsd = event.total_cost_usd;
+        }
+      } catch {
+        // Non-JSON line — stream as raw text
+        fullOutput += line + '\n';
+        broadcast(sessionId, { type: 'stream', sessionId, content: line + '\n' });
+      }
+    }
   });
 
   child.stderr.on('data', (data) => {
@@ -284,6 +318,21 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
 
   child.on('close', (code) => {
     runningProcesses.delete(sessionId);
+
+    // Process any remaining buffer
+    if (buffer.trim()) {
+      try {
+        const event = JSON.parse(buffer);
+        if (event.session_id) claudeSessionId = event.session_id;
+        if (event.type === 'result') {
+          if (event.result && !fullOutput) fullOutput = event.result;
+          if (event.total_cost_usd) costUsd = event.total_cost_usd;
+        }
+      } catch {
+        fullOutput += buffer;
+      }
+    }
+
     const output = fullOutput.trim() ||
       (code === 0 ? 'Task completed successfully.' : `Process exited with code ${code}`);
 

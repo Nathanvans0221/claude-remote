@@ -10,8 +10,35 @@ async function request<T = unknown>(path: string, options: RequestInit = {}): Pr
     },
   });
   if (res.status === 401) {
+    // Try to re-authenticate with stored password before giving up
+    const password = localStorage.getItem('claude_remote_password');
+    if (password) {
+      try {
+        const authRes = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (authRes.ok) {
+          const { token } = await authRes.json();
+          authToken = token;
+          localStorage.setItem('claude_remote_token', token);
+          // Retry the original request with new token
+          const retry = await fetch(path, {
+            ...options,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+              ...options.headers,
+            },
+          });
+          if (retry.ok) return retry.json() as T;
+        }
+      } catch {}
+    }
     authToken = null;
     localStorage.removeItem('claude_remote_token');
+    localStorage.removeItem('claude_remote_password');
     window.location.reload();
     throw new Error('Unauthorized');
   }
@@ -29,11 +56,13 @@ export const api = {
     });
     authToken = token;
     localStorage.setItem('claude_remote_token', token);
+    localStorage.setItem('claude_remote_password', password);
     return token;
   },
   logout: () => {
     authToken = null;
     localStorage.removeItem('claude_remote_token');
+    localStorage.removeItem('claude_remote_password');
   },
   isAuthed: () => !!authToken,
   getProjects: () => request<Project[]>('/api/projects'),
@@ -58,26 +87,53 @@ class WebSocketClient {
   private handlers = new Map<string, Set<WSHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private subscribedSession: string | null = null;
+  private reconnectAttempts = 0;
 
-  connect() {
+  async connect() {
     if (!authToken) return;
+
+    // Re-authenticate to ensure token is valid on current server instance
+    const password = localStorage.getItem('claude_remote_password');
+    if (password) {
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (res.ok) {
+          const { token } = await res.json();
+          authToken = token;
+          localStorage.setItem('claude_remote_token', token);
+        }
+      } catch {}
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     this.ws = new WebSocket(`${protocol}//${host}/ws?token=${authToken}`);
 
     this.ws.onopen = () => {
+      this.reconnectAttempts = 0;
       this.emit('connected', {});
       if (this.subscribedSession) this.subscribe(this.subscribedSession);
     };
     this.ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data);
+        if (event.type === 'error' && event.message === 'Unauthorized') {
+          // Token rejected — reconnect will re-auth
+          this.ws?.close();
+          return;
+        }
         this.emit(event.type, event);
       } catch {}
     };
     this.ws.onclose = () => {
       this.emit('disconnected', {});
-      this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 15000);
+      this.reconnectAttempts++;
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
     };
     this.ws.onerror = () => {};
   }

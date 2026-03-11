@@ -14,6 +14,7 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
   const [streaming, setStreaming] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,6 +58,23 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     return () => { u1(); u2(); u3(); };
   }, [sessionId, loadSession, onSessionUpdate]);
 
+  // Polling fallback when session is running (in case WebSocket drops)
+  useEffect(() => {
+    if (!sending && session?.status !== 'running') return;
+    const interval = setInterval(() => {
+      api.getSession(sessionId).then(data => {
+        if (data.status === 'idle') {
+          setSession(data);
+          setStreaming('');
+          setActiveTool(null);
+          setSending(false);
+          onSessionUpdate();
+        }
+      }).catch(() => {});
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [sessionId, sending, session?.status, onSessionUpdate]);
+
   // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -85,13 +103,25 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     setSession(prev => prev ? { ...prev, status: 'running', messages: [...prev.messages, tempMsg] } : prev);
 
     try {
+      setError(null);
       await api.sendMessage(sessionId, content);
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send';
+      if (msg.includes('busy')) {
+        // Session stuck as "running" — auto-reset and retry
+        try {
+          await api.resetSession(sessionId);
+          await api.sendMessage(sessionId, content);
+          return; // retry succeeded
+        } catch {
+          setError('Session was stuck. Please try sending again.');
+        }
+      } else {
+        setError(msg);
+      }
       setSending(false);
-      setSession(prev => prev ? {
-        ...prev, status: 'idle',
-        messages: prev.messages.filter(m => !m.id.startsWith('temp-')),
-      } : prev);
+      // Keep the user message visible but mark session as idle
+      setSession(prev => prev ? { ...prev, status: 'idle' } : prev);
     }
   };
 
@@ -181,6 +211,15 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
                   <div className="w-2 h-2 bg-fern rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex justify-center">
+            <div className="bg-red-500/20 text-red-300 text-sm px-4 py-2 rounded-lg border border-red-500/30">
+              {error}
+              <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-200">✕</button>
             </div>
           </div>
         )}

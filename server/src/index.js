@@ -256,7 +256,7 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
 
   const child = spawn(CLAUDE_BIN, args, {
     cwd,
-    env: { ...process.env },
+    env: { ...process.env, CLAUDECODE: undefined },
     maxBuffer: 50 * 1024 * 1024,
   });
   runningProcesses.set(sessionId, child);

@@ -12,6 +12,11 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Clean up Claude env vars so spawned Claude processes don't detect nesting
+delete process.env.CLAUDECODE;
+delete process.env.CLAUDE_CODE_ENTRYPOINT;
+delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+
 // ─── Config ──────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 const PASSWORD = process.env.CLAUDE_REMOTE_PASSWORD || 'clauderemote';
@@ -243,23 +248,24 @@ function broadcast(sessionId, event) {
 const runningProcesses = new Map();
 
 function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath) {
-  const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
+  const args = [
+    '-p', prompt,
+    '--output-format', 'text',
+    '--mcp-config', '{"mcpServers":{}}',
+    '--strict-mcp-config',
+  ];
   if (existingClaudeSessionId) {
     args.push('--resume', existingClaudeSessionId);
   }
-  args.push('--allowedTools',
-    'Read,Edit,Write,Bash,Glob,Grep,WebFetch,WebSearch,Agent,TodoRead,TodoWrite'
-  );
 
   const cwd = projectPath || PROJECTS_DIR;
   console.log(`[CLAUDE] Session ${sessionId} | CWD: ${cwd}`);
 
-  const child = spawn(CLAUDE_BIN, args, {
-    cwd,
-    env: { ...process.env, CLAUDECODE: undefined },
-    maxBuffer: 50 * 1024 * 1024,
-  });
+  // stdin must be 'ignore' — Claude CLI hangs if stdin is a pipe
+  const child = spawn(CLAUDE_BIN, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   runningProcesses.set(sessionId, child);
+
+  console.log(`[CLAUDE] PID ${child.pid} spawned`);
 
   let fullOutput = '';
   let claudeSessionId = existingClaudeSessionId;
@@ -267,41 +273,9 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
   let costUsd = 0;
 
   child.stdout.on('data', (data) => {
-    buffer += data.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.session_id) claudeSessionId = event.session_id;
-
-        // Assistant message — extract text from content blocks
-        if (event.type === 'assistant' && event.message?.content) {
-          for (const block of event.message.content) {
-            if (block.type === 'text' && block.text) {
-              fullOutput += block.text;
-              broadcast(sessionId, { type: 'stream', sessionId, content: block.text });
-            }
-            if (block.type === 'tool_use') {
-              broadcast(sessionId, { type: 'tool_use', sessionId, tool: block.name || 'unknown' });
-            }
-          }
-        }
-
-        // Final result
-        if (event.type === 'result') {
-          if (event.session_id) claudeSessionId = event.session_id;
-          if (event.result) fullOutput = event.result;
-          if (event.total_cost_usd) costUsd = event.total_cost_usd;
-        }
-      } catch {
-        // Non-JSON output — stream as raw text
-        fullOutput += line + '\n';
-        broadcast(sessionId, { type: 'stream', sessionId, content: line + '\n' });
-      }
-    }
+    const chunk = data.toString();
+    fullOutput += chunk;
+    broadcast(sessionId, { type: 'stream', sessionId, content: chunk });
   });
 
   child.stderr.on('data', (data) => {
@@ -310,17 +284,6 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
 
   child.on('close', (code) => {
     runningProcesses.delete(sessionId);
-
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer);
-        if (event.session_id) claudeSessionId = event.session_id;
-        if (event.type === 'result' && event.result && !fullOutput) fullOutput = event.result;
-      } catch {
-        fullOutput += buffer;
-      }
-    }
-
     const output = fullOutput.trim() ||
       (code === 0 ? 'Task completed successfully.' : `Process exited with code ${code}`);
 

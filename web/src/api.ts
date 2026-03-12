@@ -72,9 +72,9 @@ export const api = {
   getSession: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),
   deleteSession: (id: string) => request(`/api/sessions/${id}`, { method: 'DELETE' }),
   resetSession: (id: string) => request(`/api/sessions/${id}/reset`, { method: 'POST' }),
-  sendMessage: (sessionId: string, content: string) =>
+  sendMessage: (sessionId: string, content: string, imageData?: { base64: string; mimeType: string }) =>
     request<{ messageId: string }>(`/api/sessions/${sessionId}/messages`, {
-      method: 'POST', body: JSON.stringify({ content }),
+      method: 'POST', body: JSON.stringify({ content, imageData }),
     }),
   getStatus: () => request<ServerStatus>('/api/status'),
   checkUpdate: () => request<{ hasUpdate: boolean; commits: number }>('/api/check-update'),

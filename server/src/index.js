@@ -160,20 +160,21 @@ app.delete('/api/sessions/:id', (req, res) => {
 
 // Messages
 app.post('/api/sessions/:id/messages', (req, res) => {
-  const { content } = req.body;
-  if (!content?.trim()) return res.status(400).json({ error: 'Empty message' });
+  const { content, imageData } = req.body;
+  if (!content?.trim() && !imageData) return res.status(400).json({ error: 'Empty message' });
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Not found' });
   if (session.status === 'running') return res.status(409).json({ error: 'Session is busy' });
 
+  const text = content?.trim() || '';
   const msgId = uuid();
   db.prepare('INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)').run(
-    msgId, req.params.id, 'user', content.trim()
+    msgId, req.params.id, 'user', text || '[Image]'
   );
   db.prepare("UPDATE sessions SET status = 'running', updated_at = datetime('now') WHERE id = ?")
     .run(req.params.id);
 
-  processMessage(req.params.id, content.trim(), session.claude_session_id, session.project_path || PROJECTS_DIR);
+  processMessage(req.params.id, text, session.claude_session_id, session.project_path || PROJECTS_DIR, imageData || null);
   res.json({ messageId: msgId, status: 'processing' });
 });
 
@@ -345,23 +346,40 @@ function broadcast(sessionId, event) {
 // ─── Claude Runner ───────────────────────────────────────
 const runningProcesses = new Map();
 
-function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath) {
-  const args = [
-    '-p', prompt,
+function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath, imageData) {
+  const baseArgs = [
     '--output-format', 'stream-json',
     '--verbose',
     '--mcp-config', '{"mcpServers":{}}',
     '--strict-mcp-config',
   ];
-  if (existingClaudeSessionId) {
-    args.push('--resume', existingClaudeSessionId);
+  if (existingClaudeSessionId) baseArgs.push('--resume', existingClaudeSessionId);
+
+  let args, stdinPayload, stdio;
+
+  if (imageData) {
+    // Image mode: pipe a stream-json content block via stdin
+    args = ['-p', '--input-format', 'stream-json', ...baseArgs];
+    const contentBlocks = [];
+    if (prompt) contentBlocks.push({ type: 'text', text: prompt });
+    contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: imageData.mimeType, data: imageData.base64 } });
+    stdinPayload = JSON.stringify({ role: 'user', content: contentBlocks });
+    stdio = ['pipe', 'pipe', 'pipe'];
+  } else {
+    // Text mode: pass prompt as argument, stdin must be ignored or Claude hangs
+    args = ['-p', prompt, ...baseArgs];
+    stdinPayload = null;
+    stdio = ['ignore', 'pipe', 'pipe'];
   }
 
   const cwd = projectPath || PROJECTS_DIR;
-  console.log(`[CLAUDE] Session ${sessionId} | CWD: ${cwd}`);
+  console.log(`[CLAUDE] Session ${sessionId} | CWD: ${cwd}${imageData ? ' | image attached' : ''}`);
 
-  // stdin must be 'ignore' — Claude CLI hangs if stdin is a pipe
-  const child = spawn(CLAUDE_BIN, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(CLAUDE_BIN, args, { cwd, stdio });
+  if (stdinPayload) {
+    child.stdin.write(stdinPayload + '\n');
+    child.stdin.end();
+  }
   runningProcesses.set(sessionId, child);
 
   console.log(`[CLAUDE] PID ${child.pid} spawned`);

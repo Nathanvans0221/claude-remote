@@ -160,10 +160,10 @@ export default function SessionList({
           <div
             key={s.id}
             onClick={() => onSelect(s.id)}
-            className={`group relative pl-3 pr-3 py-2.5 rounded-xl cursor-pointer transition-colors ${
+            className={`group relative pl-3 pr-3 py-3 rounded-xl cursor-pointer transition-colors min-h-[56px] flex items-center ${
               activeId === s.id
                 ? 'bg-white dark:bg-zinc-800/80 shadow-sm'
-                : 'hover:bg-white/60 dark:hover:bg-zinc-900'
+                : 'hover:bg-white/60 dark:hover:bg-zinc-900 active:bg-white/80 dark:active:bg-zinc-900'
             }`}
           >
             {/* Active left-edge indicator */}
@@ -171,7 +171,7 @@ export default function SessionList({
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-fern rounded-r-full" />
             )}
 
-            <div className="flex items-start justify-between gap-2 pl-0.5">
+            <div className="flex items-start justify-between gap-2 pl-0.5 w-full">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   {s.status === 'running' && (
@@ -217,12 +217,12 @@ export default function SessionList({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-black/8 dark:border-white/5 px-3 py-2.5 flex items-center justify-between flex-shrink-0">
+      <div className="border-t border-black/8 dark:border-white/5 px-3 py-2 flex items-center justify-between flex-shrink-0" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
         <button
           onClick={onSettings}
-          className="flex items-center gap-2 px-2.5 py-1.5 text-gray-400 dark:text-zinc-600
-            hover:text-gray-600 dark:hover:text-zinc-300 rounded-lg hover:bg-black/5 dark:hover:bg-zinc-800
-            transition-all text-xs"
+          className="flex items-center gap-2 px-3 py-2.5 text-gray-400 dark:text-zinc-600
+            hover:text-gray-600 dark:hover:text-zinc-300 rounded-xl hover:bg-black/5 dark:hover:bg-zinc-800
+            transition-all text-xs active:bg-black/8 dark:active:bg-zinc-700 min-h-[44px]"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -236,8 +236,9 @@ export default function SessionList({
           {/* Theme toggle */}
           <button
             onClick={onToggleTheme}
-            className="p-1.5 text-gray-400 dark:text-zinc-600 hover:text-gray-600 dark:hover:text-zinc-400
-              rounded-lg hover:bg-black/5 dark:hover:bg-zinc-800 transition-all"
+            className="p-3 text-gray-400 dark:text-zinc-600 hover:text-gray-600 dark:hover:text-zinc-400
+              rounded-xl hover:bg-black/5 dark:hover:bg-zinc-800 transition-all min-h-[44px] min-w-[44px]
+              flex items-center justify-center active:bg-black/8 dark:active:bg-zinc-700"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? (
@@ -256,8 +257,9 @@ export default function SessionList({
           {/* Logout */}
           <button
             onClick={onLogout}
-            className="p-1.5 text-gray-400 dark:text-zinc-700 hover:text-red-500 dark:hover:text-red-400
-              rounded-lg hover:bg-black/5 dark:hover:bg-zinc-800 transition-all"
+            className="p-3 text-gray-400 dark:text-zinc-700 hover:text-red-500 dark:hover:text-red-400
+              rounded-xl hover:bg-black/5 dark:hover:bg-zinc-800 transition-all min-h-[44px] min-w-[44px]
+              flex items-center justify-center active:bg-black/8 dark:active:bg-zinc-700"
             title="Sign out"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

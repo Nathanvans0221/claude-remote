@@ -16,26 +16,43 @@ interface ImageAttachment {
 
 const STUCK_TIMEOUT = 90_000;
 
-// Compress + resize image to max 1024px, JPEG 85% — keeps base64 payload manageable
+// Compress + resize image to max 1024px, JPEG 85%.
+// Uses FileReader (not createObjectURL) for iOS camera compatibility.
 async function compressImage(file: File): Promise<ImageAttachment> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target?.result as string);
+    reader.onerror = () => reject(new Error('Failed to read image'));
+    reader.readAsDataURL(file);
+  });
+
   return new Promise((resolve) => {
     const img = new Image();
-    const url = URL.createObjectURL(file);
     img.onload = () => {
-      const MAX = 1024;
-      let { width: w, height: h } = img;
-      if (w > MAX || h > MAX) {
-        if (w > h) { h = Math.round((h * MAX) / w); w = MAX; }
-        else { w = Math.round((w * MAX) / h); h = MAX; }
+      try {
+        const MAX = 1024;
+        let { width: w, height: h } = img;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round((h * MAX) / w); w = MAX; }
+          else { w = Math.round((w * MAX) / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', 0.85);
+        resolve({ base64: compressed.split(',')[1], mimeType: 'image/jpeg', preview: compressed });
+      } catch {
+        // Canvas failed — send the original data as-is
+        const mimeType = file.type || 'image/jpeg';
+        resolve({ base64: dataUrl.split(',')[1], mimeType, preview: dataUrl });
       }
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      URL.revokeObjectURL(url);
-      resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg', preview: dataUrl });
     };
-    img.src = url;
+    img.onerror = () => {
+      // Image can't be decoded by canvas (e.g. HEIC) — send raw
+      const mimeType = file.type || 'image/jpeg';
+      resolve({ base64: dataUrl.split(',')[1], mimeType, preview: dataUrl });
+    };
+    img.src = dataUrl;
   });
 }
 
@@ -130,8 +147,12 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
-    const compressed = await compressImage(file);
-    setImage(compressed);
+    try {
+      const compressed = await compressImage(file);
+      setImage(compressed);
+    } catch {
+      setError('Could not load image. Please try again.');
+    }
   };
 
   const handleSend = async () => {

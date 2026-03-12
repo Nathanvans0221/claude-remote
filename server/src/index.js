@@ -467,7 +467,7 @@ function processMessage(sessionId, prompt, existingClaudeSessionId, projectPath)
 
 // ─── Start ───────────────────────────────────────────────
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  Claude Remote v2.0`);
+  console.log(`\n  Claude Remote v2.1`);
   console.log(`  http://0.0.0.0:${PORT}`);
   console.log(`  Projects: ${PROJECTS_DIR}`);
   console.log(`  Auth: ${PASSWORD ? 'enabled' : 'DISABLED'}`);

@@ -67,7 +67,7 @@ export default function App() {
   const settingsModal = showSettings ? <Settings onClose={() => setShowSettings(false)} /> : null;
 
   return (
-    <div className="h-screen flex bg-slate-900 text-white overflow-hidden">
+    <div className="h-dvh flex bg-slate-900 text-white overflow-hidden">
       {settingsModal}
       {/* Mobile overlay */}
       {sidebarOpen && (

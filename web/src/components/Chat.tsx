@@ -8,6 +8,8 @@ interface Props {
   onSessionUpdate: () => void;
 }
 
+const STUCK_TIMEOUT = 90_000; // 90 seconds with no stream activity → likely stuck
+
 export default function Chat({ sessionId, onSessionUpdate }: Props) {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [input, setInput] = useState('');
@@ -15,8 +17,10 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stuckWarning, setStuckWarning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   const loadSession = useCallback(async () => {
     try {
@@ -39,11 +43,15 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
       if ((e as { sessionId: string }).sessionId === sessionId) {
         setStreaming(prev => prev + (e as { content: string }).content);
         setActiveTool(null);
+        lastActivityRef.current = Date.now();
+        setStuckWarning(false);
       }
     });
     const u2 = ws.on('tool_use', (e) => {
       if ((e as { sessionId: string }).sessionId === sessionId) {
         setActiveTool((e as { tool: string }).tool);
+        lastActivityRef.current = Date.now();
+        setStuckWarning(false);
       }
     });
     const u3 = ws.on('complete', (e) => {
@@ -51,12 +59,25 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
         setStreaming('');
         setActiveTool(null);
         setSending(false);
+        setStuckWarning(false);
         loadSession();
         onSessionUpdate();
       }
     });
     return () => { u1(); u2(); u3(); };
   }, [sessionId, loadSession, onSessionUpdate]);
+
+  // Stuck session detection
+  useEffect(() => {
+    if (!sending) { setStuckWarning(false); return; }
+    lastActivityRef.current = Date.now();
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > STUCK_TIMEOUT) {
+        setStuckWarning(true);
+      }
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [sending]);
 
   // Polling fallback when session is running (in case WebSocket drops)
   useEffect(() => {
@@ -82,12 +103,26 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
 
   const handleSend = async () => {
     const content = input.trim();
-    if (!content || sending) return;
+    if (!content) return;
+
+    // If session appears stuck/running, auto-reset first
+    if (sending || session?.status === 'running') {
+      try {
+        await api.resetSession(sessionId);
+        setSending(false);
+        setStreaming('');
+        setActiveTool(null);
+        setStuckWarning(false);
+      } catch {
+        // continue anyway
+      }
+    }
 
     setInput('');
     setSending(true);
     setStreaming('');
     setActiveTool(null);
+    setStuckWarning(false);
 
     // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -137,6 +172,7 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     setSending(false);
     setStreaming('');
     setActiveTool(null);
+    setStuckWarning(false);
     loadSession();
   };
 
@@ -227,7 +263,18 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
+      {/* Stuck session banner */}
+      {stuckWarning && (
+        <div className="px-4 py-2 bg-amber-500/20 border-t border-amber-500/30 flex items-center justify-between flex-shrink-0">
+          <span className="text-xs text-amber-300">Session may be stuck — no activity for 90s</span>
+          <button onClick={handleReset}
+            className="px-3 py-1 text-xs bg-amber-500/30 text-amber-200 rounded-full hover:bg-amber-500/40 transition-colors">
+            Force Reset
+          </button>
+        </div>
+      )}
+
+      {/* Input — never fully disabled, auto-resets stuck sessions on send */}
       <div className="p-3 lg:p-4 bg-slate-800 border-t border-slate-700 flex-shrink-0">
         <div className="flex gap-2 items-end max-w-4xl mx-auto">
           <textarea
@@ -235,12 +282,11 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isRunning ? 'Claude is working...' : 'Message Claude Code...'}
-            disabled={isRunning}
+            placeholder={isRunning ? 'Claude is working... (type to force new message)' : 'Message Claude Code...'}
             rows={1}
-            className="flex-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white text-sm
-              placeholder-slate-400 resize-none focus:outline-none focus:border-fern focus:ring-1
-              focus:ring-fern disabled:opacity-50 max-h-32"
+            className={`flex-1 px-4 py-3 bg-slate-700 border rounded-xl text-white text-sm
+              placeholder-slate-400 resize-none focus:outline-none focus:ring-1 max-h-32
+              ${isRunning ? 'border-amber-500/50 focus:border-amber-500 focus:ring-amber-500/50' : 'border-slate-600 focus:border-fern focus:ring-fern'}`}
             style={{ minHeight: '48px' }}
             onInput={(e) => {
               const t = e.target as HTMLTextAreaElement;
@@ -250,9 +296,9 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isRunning}
-            className="px-4 py-3 bg-fern hover:bg-fern-dark disabled:bg-slate-600
-              disabled:cursor-not-allowed text-white rounded-xl transition-colors flex-shrink-0"
+            disabled={!input.trim()}
+            className={`px-4 py-3 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-xl transition-colors flex-shrink-0
+              ${isRunning ? 'bg-amber-500 hover:bg-amber-600' : 'bg-fern hover:bg-fern-dark'}`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -261,7 +307,7 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
           </button>
         </div>
         <p className="text-[10px] text-slate-500 mt-1.5 text-center">
-          Shift+Enter for newline
+          {isRunning ? 'Sending will reset the stuck session' : 'Shift+Enter for newline'}
         </p>
       </div>
     </div>

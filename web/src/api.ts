@@ -77,6 +77,9 @@ export const api = {
       method: 'POST', body: JSON.stringify({ content }),
     }),
   getStatus: () => request<ServerStatus>('/api/status'),
+  checkUpdate: () => request<{ hasUpdate: boolean; commits: number }>('/api/check-update'),
+  applyUpdate: () => request<{ ok: boolean }>('/api/apply-update', { method: 'POST' }),
+  getVersionHistory: () => request<VersionCommit[]>('/api/version-history'),
   getSettings: () => request<Record<string, string>>('/api/settings'),
   updateSettings: (settings: Record<string, string>) =>
     request('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
@@ -198,6 +201,13 @@ export interface Message {
 export interface SessionDetail extends Session {
   messages: Message[];
   claude_session_id: string | null;
+}
+
+export interface VersionCommit {
+  hash: string;
+  subject: string;
+  date: string;
+  author: string;
 }
 
 export interface ServerStatus {

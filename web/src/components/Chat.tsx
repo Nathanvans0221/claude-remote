@@ -8,7 +8,7 @@ interface Props {
   onSessionUpdate: () => void;
 }
 
-const STUCK_TIMEOUT = 90_000; // 90 seconds with no stream activity → likely stuck
+const STUCK_TIMEOUT = 90_000;
 
 export default function Chat({ sessionId, onSessionUpdate }: Props) {
   const [session, setSession] = useState<SessionDetail | null>(null);
@@ -37,7 +37,6 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     ws.subscribe(sessionId);
   }, [sessionId, loadSession]);
 
-  // WebSocket events
   useEffect(() => {
     const u1 = ws.on('stream', (e) => {
       if ((e as { sessionId: string }).sessionId === sessionId) {
@@ -67,19 +66,15 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     return () => { u1(); u2(); u3(); };
   }, [sessionId, loadSession, onSessionUpdate]);
 
-  // Stuck session detection
   useEffect(() => {
     if (!sending) { setStuckWarning(false); return; }
     lastActivityRef.current = Date.now();
     const interval = setInterval(() => {
-      if (Date.now() - lastActivityRef.current > STUCK_TIMEOUT) {
-        setStuckWarning(true);
-      }
+      if (Date.now() - lastActivityRef.current > STUCK_TIMEOUT) setStuckWarning(true);
     }, 10_000);
     return () => clearInterval(interval);
   }, [sending]);
 
-  // Polling fallback when session is running (in case WebSocket drops)
   useEffect(() => {
     if (!sending && session?.status !== 'running') return;
     const interval = setInterval(() => {
@@ -96,7 +91,6 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     return () => clearInterval(interval);
   }, [sessionId, sending, session?.status, onSessionUpdate]);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages, streaming, activeTool]);
@@ -105,7 +99,6 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     const content = input.trim();
     if (!content) return;
 
-    // If session appears stuck/running, auto-reset first
     if (sending || session?.status === 'running') {
       try {
         await api.resetSession(sessionId);
@@ -113,9 +106,7 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
         setStreaming('');
         setActiveTool(null);
         setStuckWarning(false);
-      } catch {
-        // continue anyway
-      }
+      } catch {}
     }
 
     setInput('');
@@ -124,10 +115,8 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     setActiveTool(null);
     setStuckWarning(false);
 
-    // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    // Optimistic update
     const tempMsg: Message = {
       id: 'temp-' + Date.now(),
       session_id: sessionId,
@@ -143,11 +132,10 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send';
       if (msg.includes('busy')) {
-        // Session stuck as "running" — auto-reset and retry
         try {
           await api.resetSession(sessionId);
           await api.sendMessage(sessionId, content);
-          return; // retry succeeded
+          return;
         } catch {
           setError('Session was stuck. Please try sending again.');
         }
@@ -155,7 +143,6 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
         setError(msg);
       }
       setSending(false);
-      // Keep the user message visible but mark session as idle
       setSession(prev => prev ? { ...prev, status: 'idle' } : prev);
     }
   };
@@ -178,8 +165,8 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
 
   if (!session) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-500">
-        <div className="animate-pulse">Loading session...</div>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-gray-300 dark:text-zinc-700 text-sm animate-pulse">Loading…</div>
       </div>
     );
   }
@@ -187,22 +174,33 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
   const isRunning = session.status === 'running' || sending;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-black">
       {/* Session header */}
-      <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex items-center justify-between flex-shrink-0">
+      <div className="px-5 py-3.5 border-b border-black/8 dark:border-white/5 flex items-center justify-between
+        flex-shrink-0 bg-white/90 dark:bg-black/80 backdrop-blur-sm">
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold truncate">{session.title}</h2>
-          {session.project && <span className="text-xs text-fern-light">{session.project}</span>}
+          <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white tracking-tight truncate">
+            {session.title}
+          </h2>
+          {session.project && (
+            <span className="text-[11px] text-fern/70 dark:text-fern-light/70">{session.project}</span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {isRunning && (
-            <button onClick={handleReset}
-              className="px-3 py-1.5 text-xs bg-amber-500/20 text-amber-400 rounded-full hover:bg-amber-500/30 transition-colors">
+            <button
+              onClick={handleReset}
+              className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700
+                text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-white rounded-full
+                transition-colors border border-black/5 dark:border-white/5"
+            >
               Stop
             </button>
           )}
-          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-            isRunning ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'
+          <span className={`text-[11px] px-2.5 py-1 rounded-full font-medium tabular-nums ${
+            isRunning
+              ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400/90'
+              : 'bg-gray-100 dark:bg-zinc-900 text-gray-400 dark:text-zinc-600'
           }`}>
             {isRunning ? 'running' : 'idle'}
           </span>
@@ -210,14 +208,12 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto py-5 space-y-2">
         {session.messages.length === 0 && !streaming && !sending && (
-          <div className="text-center text-slate-500 py-16">
-            <p className="text-sm">Send a message to start working with Claude Code</p>
+          <div className="text-center py-16 px-8">
+            <p className="text-sm text-gray-300 dark:text-zinc-700">Send a message to start</p>
             {session.project && (
-              <p className="text-xs mt-2 text-fern-light">
-                Working in: {session.project}
-              </p>
+              <p className="text-xs mt-1.5 text-fern/50 dark:text-fern-light/40">{session.project}</p>
             )}
           </div>
         )}
@@ -228,23 +224,27 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
 
         {/* Streaming / Loading */}
         {(streaming || sending) && (
-          <div className="flex justify-start">
-            <div className="max-w-[90%] lg:max-w-[75%] rounded-2xl px-4 py-3 bg-slate-800 border border-slate-700">
+          <div className="flex justify-start px-4">
+            <div className="max-w-[85%] lg:max-w-[72%] bg-gray-100 dark:bg-zinc-900 rounded-[20px]
+              rounded-bl-[5px] px-4 py-3 border border-black/5 dark:border-white/5">
               {streaming ? (
-                <div className="msg-content text-sm text-slate-200">
+                <div className="msg-content text-sm text-gray-800 dark:text-zinc-100 leading-relaxed">
                   <Markdown>{streaming}</Markdown>
-                  <span className="inline-block w-2 h-4 bg-fern animate-pulse ml-0.5 align-text-bottom" />
+                  <span className="inline-block w-[7px] h-[15px] bg-fern/60 animate-pulse ml-0.5
+                    align-text-bottom rounded-[2px]" />
                 </div>
               ) : activeTool ? (
-                <div className="flex items-center gap-2 text-sm text-fern-light">
-                  <div className="w-4 h-4 border-2 border-fern border-t-transparent rounded-full animate-spin" />
-                  Using {activeTool}...
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="w-3.5 h-3.5 border-[1.5px] border-fern/50 border-t-transparent
+                    rounded-full animate-spin" />
+                  <span className="text-fern/70 dark:text-fern-light/60">{activeTool}</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 py-1">
-                  <div className="w-2 h-2 bg-fern rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-fern rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-fern rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="flex items-center gap-1 py-0.5">
+                  {[0, 150, 300].map((delay) => (
+                    <div key={delay} className="w-1.5 h-1.5 bg-gray-300 dark:bg-zinc-600 rounded-full animate-bounce"
+                      style={{ animationDelay: `${delay}ms` }} />
+                  ))}
                 </div>
               )}
             </div>
@@ -252,10 +252,16 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
         )}
 
         {error && (
-          <div className="flex justify-center">
-            <div className="bg-red-500/20 text-red-300 text-sm px-4 py-2 rounded-lg border border-red-500/30">
-              {error}
-              <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-200">✕</button>
+          <div className="flex justify-center px-4">
+            <div className="bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 text-xs px-4 py-2.5
+              rounded-2xl border border-red-200 dark:border-red-500/20 flex items-center gap-3">
+              <span>{error}</span>
+              <button onClick={() => setError(null)}
+                className="text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
           </div>
         )}
@@ -265,50 +271,67 @@ export default function Chat({ sessionId, onSessionUpdate }: Props) {
 
       {/* Stuck session banner */}
       {stuckWarning && (
-        <div className="px-4 py-2 bg-amber-500/20 border-t border-amber-500/30 flex items-center justify-between flex-shrink-0">
-          <span className="text-xs text-amber-300">Session may be stuck — no activity for 90s</span>
-          <button onClick={handleReset}
-            className="px-3 py-1 text-xs bg-amber-500/30 text-amber-200 rounded-full hover:bg-amber-500/40 transition-colors">
-            Force Reset
+        <div className="mx-4 mb-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-500/10 border border-amber-200
+          dark:border-amber-500/20 rounded-2xl flex items-center justify-between flex-shrink-0">
+          <span className="text-xs text-amber-600 dark:text-amber-400/80">No activity for 90s — session may be stuck</span>
+          <button
+            onClick={handleReset}
+            className="px-3 py-1 text-xs bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300
+              rounded-full hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors ml-3"
+          >
+            Reset
           </button>
         </div>
       )}
 
-      {/* Input — never fully disabled, auto-resets stuck sessions on send */}
-      <div className="p-3 lg:p-4 bg-slate-800 border-t border-slate-700 flex-shrink-0">
-        <div className="flex gap-2 items-end max-w-4xl mx-auto">
+      {/* Input */}
+      <div className="px-4 pb-4 pt-2 flex-shrink-0">
+        <div className={`flex items-end gap-2 bg-gray-100 dark:bg-zinc-900 rounded-[22px] border
+          px-3.5 py-1.5 transition-colors max-w-4xl mx-auto ${
+            isRunning
+              ? 'border-amber-300/60 dark:border-amber-500/25'
+              : 'border-black/8 dark:border-white/8'
+          }`}>
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isRunning ? 'Claude is working... (type to force new message)' : 'Message Claude Code...'}
+            placeholder={isRunning ? 'Claude is working…' : 'Message'}
             rows={1}
-            className={`flex-1 px-4 py-3 bg-slate-700 border rounded-xl text-white text-sm
-              placeholder-slate-400 resize-none focus:outline-none focus:ring-1 max-h-32
-              ${isRunning ? 'border-amber-500/50 focus:border-amber-500 focus:ring-amber-500/50' : 'border-slate-600 focus:border-fern focus:ring-fern'}`}
-            style={{ minHeight: '48px' }}
+            className="flex-1 bg-transparent text-gray-900 dark:text-white text-sm
+              placeholder-gray-400 dark:placeholder-zinc-600 resize-none
+              focus:outline-none py-2.5 max-h-36 leading-5"
+            style={{ minHeight: '38px' }}
             onInput={(e) => {
               const t = e.target as HTMLTextAreaElement;
               t.style.height = 'auto';
-              t.style.height = Math.min(t.scrollHeight, 128) + 'px';
+              t.style.height = Math.min(t.scrollHeight, 144) + 'px';
             }}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim()}
-            className={`px-4 py-3 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-xl transition-colors flex-shrink-0
-              ${isRunning ? 'bg-amber-500 hover:bg-amber-600' : 'bg-fern hover:bg-fern-dark'}`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mb-1
+              transition-all ${
+                input.trim()
+                  ? isRunning
+                    ? 'bg-amber-500 hover:bg-amber-600'
+                    : 'bg-fern hover:bg-fern-dark'
+                  : 'bg-gray-200 dark:bg-zinc-800'
+              }`}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M5 12h14M12 5l7 7-7 7" />
+            <svg className={`w-4 h-4 ${input.trim() ? 'text-white' : 'text-gray-400 dark:text-zinc-600'}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
             </svg>
           </button>
         </div>
-        <p className="text-[10px] text-slate-500 mt-1.5 text-center">
-          {isRunning ? 'Sending will reset the stuck session' : 'Shift+Enter for newline'}
-        </p>
+        {isRunning && (
+          <p className="text-[10px] text-gray-400 dark:text-zinc-700 mt-1.5 text-center">
+            Sending will interrupt and restart
+          </p>
+        )}
       </div>
     </div>
   );
@@ -318,20 +341,20 @@ function MessageBubble({ message: msg }: { message: Message }) {
   const isUser = msg.role === 'user';
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[90%] lg:max-w-[75%] rounded-2xl px-4 py-3 ${
+    <div className={`flex px-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`max-w-[85%] lg:max-w-[72%] ${
         isUser
-          ? 'bg-fern text-white'
-          : 'bg-slate-800 text-slate-200 border border-slate-700'
+          ? 'bg-fern text-white rounded-[20px] rounded-br-[5px] px-4 py-2.5'
+          : 'bg-gray-100 dark:bg-zinc-900 text-gray-800 dark:text-zinc-100 rounded-[20px] rounded-bl-[5px] px-4 py-3 border border-black/5 dark:border-white/5'
       }`}>
         {isUser ? (
-          <div className="text-sm whitespace-pre-wrap break-words">{msg.content}</div>
+          <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</div>
         ) : (
-          <div className="msg-content text-sm">
+          <div className="msg-content text-sm leading-relaxed">
             <Markdown>{msg.content}</Markdown>
           </div>
         )}
-        <div className={`text-[10px] mt-1.5 ${isUser ? 'text-white/60' : 'text-slate-500'}`}>
+        <div className={`text-[10px] mt-1.5 ${isUser ? 'text-white/45 text-right' : 'text-gray-400 dark:text-zinc-600'}`}>
           {new Date(msg.created_at + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>

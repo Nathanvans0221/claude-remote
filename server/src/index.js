@@ -3,7 +3,7 @@ import cors from 'cors';
 import Database from 'better-sqlite3';
 import { v4 as uuid } from 'uuid';
 import { WebSocketServer } from 'ws';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
@@ -20,7 +20,7 @@ delete process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
 // ─── Config ──────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 const PASSWORD = process.env.CLAUDE_REMOTE_PASSWORD || 'clauderemote';
-const PROJECTS_DIR = process.env.PROJECTS_DIR || '/mnt/c/Users/NathanvanWingerden';
+const PROJECTS_DIR = process.env.PROJECTS_DIR || '/root/projects';
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const TASK_TIMEOUT = 30 * 60 * 1000;
 
@@ -195,6 +195,53 @@ app.get('/api/status', (_req, res) => {
     totalMessages: db.prepare('SELECT COUNT(*) as c FROM messages').get().c,
     uptime: process.uptime(),
   });
+});
+
+// Update check / apply
+app.get('/api/check-update', (_req, res) => {
+  try {
+    const repoPath = path.resolve(__dirname, '..', '..');
+    execSync('git fetch origin', { cwd: repoPath, encoding: 'utf8', timeout: 15000 });
+    const behind = execSync('git log HEAD..origin/main --oneline', { cwd: repoPath, encoding: 'utf8' }).trim();
+    const commits = behind ? behind.split('\n').length : 0;
+    res.json({ hasUpdate: commits > 0, commits });
+  } catch {
+    res.json({ hasUpdate: false, commits: 0 });
+  }
+});
+
+app.post('/api/apply-update', (_req, res) => {
+  try {
+    const repoPath = path.resolve(__dirname, '..', '..');
+    execSync('git pull origin main', { cwd: repoPath, encoding: 'utf8', timeout: 30000 });
+    res.json({ ok: true });
+    // Rebuild frontend then restart — systemd/pm2 will bring it back up
+    const child = spawn('bash', ['-c', `cd "${repoPath}" && npm run build:web`], {
+      detached: true, stdio: 'ignore',
+    });
+    child.unref();
+    child.on('close', () => process.exit(0));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Version history
+app.get('/api/version-history', (_req, res) => {
+  try {
+    const repoPath = path.resolve(__dirname, '..', '..');
+    const out = execSync(
+      'git log --pretty=format:"%H|%s|%ad|%an" --date=iso-strict -30',
+      { cwd: repoPath, encoding: 'utf8' }
+    );
+    const commits = out.trim().split('\n').filter(Boolean).map(line => {
+      const [hash, subject, date, author] = line.split('|');
+      return { hash: hash?.slice(0, 7), subject, date, author };
+    });
+    res.json(commits);
+  } catch {
+    res.json([]);
+  }
 });
 
 // Settings

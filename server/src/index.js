@@ -227,14 +227,18 @@ async function sendNtfyNotification(sessionTitle, preview) {
   if (!topic || enabled !== 'true') return;
 
   try {
+    // ASCII-safe title for HTTP headers
+    const safeTitle = `Claude Remote - ${(sessionTitle || 'Session').replace(/[^\x20-\x7E]/g, '')}`;
+    const safeBody = preview.replace(/[^\x20-\x7E\n\r\t]/g, '').slice(0, 200);
     await fetch(`https://ntfy.sh/${topic}`, {
       method: 'POST',
       headers: {
-        'Title': `Claude Remote — ${sessionTitle || 'Session'}`,
+        'Title': safeTitle,
         'Tags': 'robot',
       },
-      body: preview.length > 200 ? preview.slice(0, 200) + '...' : preview,
+      body: safeBody + (preview.length > 200 ? '...' : ''),
     });
+    console.log(`[NTFY] Sent to ${topic}`);
   } catch (err) {
     console.error(`[NTFY] Failed: ${err.message}`);
   }
